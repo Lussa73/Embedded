@@ -3,7 +3,7 @@
   Version : 1.0
   Project : ClearSky 2.0
   Date : 13/03/2019
-  DEMS authors : Régis and Dorian
+  DEMS authors : Régis,Dorian,Vincent and Clement
 
   library MQ-135
   https://github.com/GeorgK/MQ135
@@ -37,10 +37,10 @@
 //#define PIN_RESET 4
 #define pmsSerial Serial1
 #define PMS_SLEEP 5
+
 // Declaration and initialization of the input pin
-const int Analog_in = A1; // X-axis-signal
-const int mq135Pin = A5;     // Pin sur lequel est branché de MQ135
-const int Digital_in = 0; // Button
+const int Analog_in = A1;     // Micro
+const int mq135Pin = A5;      // Pin sur lequel est branché de MQ135
 const int AlimNormal = 1;
 const int AlimPrech = 2;
 
@@ -49,35 +49,10 @@ const int AlimPrech = 2;
 /* Global constants **********************************************************************/
 /*****************************************************************************************/
 
-//SoftwareSerial pmsSerial(6, 7);
-
 //Setup connection of the sensor
 Adafruit_BMP280 bmp; // I2C
 
-
-//Variables
-MQ135 gasSensor = MQ135(mq135Pin);  // Initialise l'objet MQ135 sur le Pin spécifié
-
-void setup()
-{
-  pinMode(AlimPrech, OUTPUT);
-  pinMode(AlimNormal, OUTPUT);
-  pinMode(LED_BUILTIN, OUTPUT);
-
-
-  Serial.println("Démarrage du Setup...");
-  Serial.begin(9600);     // Initialise le port série à 9600 bps
-  pmsSerial.begin(9600);
-  pinMode (Analog_in, INPUT);
-  pinMode (Digital_in, INPUT);
-  //bmp.begin();                           //To be deleted
-  while (!bmp.begin()) {
-    Serial.println(F("Could not find a valid BMP280 sensor, check wiring!"));
-    delay(3000);
-  }
-  Serial.println("bmp ok");
-  LowPower.attachInterruptWakeup(RTC_ALARM_WAKEUP, dummy, CHANGE);
-}
+//SoftwareSerial pmsSerial(6, 7);
 
 struct pms5003data {
   uint16_t framelen;
@@ -90,7 +65,33 @@ struct pms5003data {
 
 struct pms5003data data;
 
+//Variables
+MQ135 gasSensor = MQ135(mq135Pin);  // Initialize the MQ135 object on the specified Pin
 
+
+void setup()
+{
+  pinMode(AlimPrech, OUTPUT);     //Sensor supply requiring preheating
+  pinMode(AlimNormal, OUTPUT);    //Sensor supply for instant acquisition
+  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode (Analog_in, INPUT);     // Micro
+
+  Serial.println("Démarrage du Setup...");
+  Serial.begin(9600);     // Initialise le port série à 9600 bps
+  pmsSerial.begin(9600);
+  while (!bmp.begin()) {
+    Serial.println(F("Could not find a valid BMP280 sensor, check wiring!"));
+    delay(3000);
+  }
+  Serial.println("bmp ok");
+  LowPower.attachInterruptWakeup(RTC_ALARM_WAKEUP, dummy, CHANGE);
+
+#ifdef NO_DEBUG_CS
+  Serial.println("no debug");
+#else
+  Serial.println("debug mode");
+#endif
+}
 
 /**************************************************************************************************/
 /* BOUCLE D'EXECUTION PRINCIPALE ******************************************************************/
@@ -100,47 +101,31 @@ void loop() {
   float gazPpm;
   float gazAzero;
   float micAnalog;              //Analog signal from microphone
-  int micDigital;               //Digital value from microphone
   float barPressure;            //Barometric pressure (Pa)
   float barTemperature;         //Temperature (°C)
   int barAltimeter;             //Altimeter (m)
   bool pmsOK;
   char MyMessage;
 
-  
+
   digitalWrite(AlimPrech, HIGH);
   digitalWrite(AlimNormal, HIGH);
-  /*Données du capteur de gaz*/
-  readGaz(&gazRzero, &gazPpm, &gazAzero);       // Lecture des données du capteur de gaz
 
-  delay(500);                                   // Actualise la mesure chaque seconde
+  /*Données du capteur de gaz*/
+  readGaz(&gazRzero, &gazPpm, &gazAzero);       // Reading gas sensor data
+  delay(500);                                   // waiting
   /*Données du capteur de particule*/
   pmsOK = readPMSdata(&pmsSerial);
   Serial.println(pmsOK);
   /*Données du capteur de son*/
-  readSound(&micAnalog, &micDigital);
+  readSound(&micAnalog);
 
-  //delay (200);
   /*Données du barometre*/
   readBarometer(&barPressure, &barTemperature, &barAltimeter);
-  //barAltimeter
-  MyMessage = (char)barAltimeter;
-  Serial.println(MyMessage);
-  
+
   delay(100);
-  #ifdef NO_DEBUG_CS
-      Serial.println("no debug");
-  #else
-    sendBarometer(barPressure, barTemperature, barAltimeter);
-    sendSound(micAnalog, micDigital);
-    sendGaz(gazRzero, gazPpm, gazAzero);          // Envoie de ces données
-    if (pmsOK) {                                  // Si la lecture des données du capteur de particule fonctionne
-      sendPMSdata();                              // On envoie ces données
-    }
-  #endif  
-
+  printAll(&barPressure, &barTemperature, &barAltimeter, &micAnalog, &gazRzero, &gazPpm, &gazAzero, &pmsOK);
   
-
   audodo();       //mets l'arduino en veille
   delay(5000);  //Update every 5 sec
 
@@ -152,7 +137,17 @@ void loop() {
   Serial.println(micAnalog);
   Serial.println(gazPpm);
   Serial.println(micAnalog);
-}*/              
+  }*/
+  
+void printAll(float *pressure, float *temperature, int *altimeter, float *analog, float *rzero, float *ppm, float *azero, bool *pmsOK){
+  sendBarometer(*pressure, *temperature, *altimeter);
+  sendSound(*analog);
+  sendGaz(*rzero, *ppm, *azero);          // Envoie de ces données
+  if (*pmsOK) {                              // Si la lecture des données du capteur de particule fonctionne
+    sendPMSdata();                              // On envoie ces données
+  }
+}
+
 
 void audodo() {
   int i;
@@ -304,10 +299,9 @@ void sendPMSdata() {
 /* Lecture des données du capteurs de son *********************************************************/
 /**************************************************************************************************/
 
-void readSound(float *analog, int* digit) {
+void readSound(float *analog) {
   // Current value will be read and converted to voltage
   *analog = analogRead (Analog_in) * (3.3 / 1023.0);
-  *digit = digitalRead (Digital_in);
   return;
 }
 
@@ -315,21 +309,12 @@ void readSound(float *analog, int* digit) {
 /* Envoie des données du capteurs de son **********************************************************/
 /**************************************************************************************************/
 
-void sendSound(float Analog, int Digital) {
+void sendSound(float Analog) {
 
   Serial.println("Données microphone");
   Serial.print ("Analog voltage value: "); //Print the Analog value
   Serial.print (Analog, 4);
   Serial.print ("V, ");
-
-  //Test the Digital pin
-  Serial.print ("Extreme value: ");
-  if (Digital == 1)  {
-    Serial.println (" reached");
-  }
-  else  {
-    Serial.println (" not reached yet");
-  }
   Serial.println ("----------------------------------------------------------");
 
 }
