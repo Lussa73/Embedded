@@ -84,7 +84,7 @@ void setup()
     delay(3000);
   }
   Serial.println("bmp ok");
-  LowPower.attachInterruptWakeup(RTC_ALARM_WAKEUP, dummy, CHANGE);
+  LowPower.attachInterruptWakeup(RTC_ALARM_WAKEUP, interuptAfterSleep, CHANGE);
 
 #ifdef NO_DEBUG_CS
   Serial.println("no debug");
@@ -106,29 +106,29 @@ void loop() {
   int barAltimeter;             //Altimeter (m)
   bool pmsOK;
   char MyMessage;
+  int NbSends = 24;
 
-
+  //-----------------------------------Transistor activation-------------------------------------
   digitalWrite(AlimPrech, HIGH);
   digitalWrite(AlimNormal, HIGH);
 
+  //---------------------------------------Acquisition-------------------------------------------
   /*Données du capteur de gaz*/
   readGaz(&gazRzero, &gazPpm, &gazAzero);       // Reading gas sensor data
-  delay(500);                                   // waiting
+  delay(1000);                                   // waiting
   /*Données du capteur de particule*/
   pmsOK = readPMSdata(&pmsSerial);
-  Serial.println(pmsOK);
   /*Données du capteur de son*/
   readSound(&micAnalog);
-
   /*Données du barometre*/
   readBarometer(&barPressure, &barTemperature, &barAltimeter);
-
   delay(100);
-  printAll(&barPressure, &barTemperature, &barAltimeter, &micAnalog, &gazRzero, &gazPpm, &gazAzero, &pmsOK);
-  
-  audodo();       //mets l'arduino en veille
-  delay(5000);  //Update every 5 sec
 
+  //------------------------------------------Print---------------------------------------------
+  printAll(&barPressure, &barTemperature, &barAltimeter, &micAnalog, &gazRzero, &gazPpm, &gazAzero, &pmsOK);
+
+  //------------------------------------------Sleep---------------------------------------------
+  audodo(NbSends);       //put the arduino on standby
 }
 
 /*void tramSigFox() {
@@ -138,28 +138,31 @@ void loop() {
   Serial.println(gazPpm);
   Serial.println(micAnalog);
   }*/
-  
-void printAll(float *pressure, float *temperature, int *altimeter, float *analog, float *rzero, float *ppm, float *azero, bool *pmsOK){
+
+void printAll(float *pressure, float *temperature, int *altimeter, float *analog, float *rzero, float *ppm, float *azero, bool *pmsOK) {
   sendBarometer(*pressure, *temperature, *altimeter);
   sendSound(*analog);
   sendGaz(*rzero, *ppm, *azero);          // Envoie de ces données
-  if (*pmsOK) {                              // Si la lecture des données du capteur de particule fonctionne
-    sendPMSdata();                              // On envoie ces données
+  if (*pmsOK) {                           // Si la lecture des données du capteur de particule fonctionne
+    sendPMSdata();                        // On envoie ces données
   }
 }
 
 
-void audodo() {
-  int i;
-
+void audodo(int nbSends) {
+  float freqSends = nbSends / 24.0;
+  //------------------------------------- shutdown sensors ---------------------------------
   digitalWrite(AlimPrech, false);
   digitalWrite(AlimNormal, false);
   digitalWrite(LED_BUILTIN, LOW);
-
-  dormir(40);                     //temps de sommeil à calculé en fonction de la fréquence de mesure
+  //------------------------------------- make arduino sleep -------------------------------
+  dormir(freqSends);     //sleep time to calculate according to the frequency of measurement
+  //--------------------turn on supply of sensors requiring preheating----------------------
   digitalWrite(AlimPrech, true);
   digitalWrite(LED_BUILTIN, HIGH);
+  //------------------------------------- wait 10min ---------------------------------------
   delay(600000);
+  //------------------------------------- turn all sensors on ------------------------------
   digitalWrite(AlimNormal, true);
 }
 
@@ -172,16 +175,15 @@ void dormir(float TsleepMin) {
   T5minMS = 60 * 1000 * 5;
   T10sMS = 10 * 1000;
 
-  while (TsleepMs > T5minMS) {          //tant que Tsleep > 5min
-    LowPower.sleep(T5minMS - T10sMS);    //dormir 4min50s
+  while (TsleepMs > T5minMS) {          //while Tsleep > 5min
+    LowPower.sleep(T5minMS - T10sMS);    //sleep 4min50s
     delay(T10sMS);
     TsleepMs = TsleepMs - T5minMS;
   }
   LowPower.sleep(TsleepMs);
 }
 
-void dummy() {
-  //alarm_source = 0;
+void interuptAfterSleep() {
 }
 
 /**************************************************************************************************/
